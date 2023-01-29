@@ -22,7 +22,7 @@ public:
 	//! \return QMap<device ID, human-readable device name>
 	static QMap<QString /* key */, QString /* name */> devices();
 
-	explicit QMidiIn(QObject *parent = nullptr);
+	explicit QMidiIn(QObject *parent = Q_NULLPTR);
 	~QMidiIn();
 
 	//! \brief connect Connect to the MIDI input device specified by

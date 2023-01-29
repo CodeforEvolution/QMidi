@@ -1,83 +1,112 @@
 /*
- * Copyright 2020 Jacob Secunda <secundaja@gmail.com>
+ * Copyright 2023 Jacob Secunda <secundaja@gmail.com>
  * All rights reserved. Distributed under the terms of the MIT license.
  */
 #include "QMidiOut.h"
 #include "QMidiIn.h"
 
+#include <Availability.h>
 #include <CoreAudio/HostTime.h>
-#include <CoreServices/CoreServices.h>
 #include <CoreMIDI/CoreMIDI.h>
 
-// # pragma mark - QMidiOut
+#include <QCoreApplication>
+
+#pragma mark - globals
+
+static dispatch_once_t sJustThisOneTime = 0;
+static MIDIClientRef sMidiClient = 0;
+
+static void _initQMidiClient(void* context)
+{
+    auto result = static_cast<OSStatus*>(context);
+
+    QString clientName = QCoreApplication::applicationName();
+    *result = MIDIClientCreate(clientName.toCFString(), Q_NULLPTR, Q_NULLPTR,
+                              &sMidiClient);
+}
+
+
+#pragma mark - QMidiOut
 
 struct NativeMidiOutInstances {
-	MIDIClientRef client;
 	MIDIPortRef outputPort;
 	MIDIEndpointRef destinationId;
 };
 
-// TODO: error reporting
 
+static void _MIDISysexCompleted(MIDISysexSendRequest *request)
+{
+    delete request;
+}
+
+
+// TODO: error reporting
 QMap<QString, QString> QMidiOut::devices()
 {
 	QMap<QString, QString> ret;
 
 	CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, false);
-	int destinations = MIDIGetNumberOfDestinations();
-	for (int destIndex = 0; destIndex <= destinations; destIndex++) {
+	quint32 destinations = MIDIGetNumberOfDestinations();
+	for (quint32 destIndex = 0; destIndex <= destinations; destIndex++) {
 		MIDIEndpointRef destRef = MIDIGetDestination(destIndex);
 		if (destRef != 0) {
-			CFStringRef stringRef = nullptr;
-  			char name[256];
+			CFStringRef nameRef;
 
   			MIDIObjectGetStringProperty(destRef,
-				kMIDIPropertyDisplayName, &stringRef);
-			CFStringGetCString(stringRef, name, sizeof(name),
-				kCFStringEncodingUTF8);
-			CFRelease(stringRef);
+				kMIDIPropertyDisplayName, &nameRef);
 
 			ret.insert(QString::number(destIndex),
-				QString::fromUtf8(name));
+				QString::fromCFString(nameRef));
+
+			CFRelease(nameRef);
 		}
 	}
 
 	return ret;
 }
 
+
 bool QMidiOut::connect(QString outDeviceId)
 {
+    OSStatus result = noErr;
+
+	dispatch_once_f(&sJustThisOneTime, &result, _initQMidiClient);
+    if (result != noErr)
+        return false;
+
 	if (fConnected)
 		disconnect();
 
-	OSStatus result;
-	fMidiPtrs = new NativeMidiOutInstances;
+    fMidiPtrs = new(std::nothrow) NativeMidiOutInstances;
+    Q_CHECK_PTR(fMidiPtrs);
 
-	QString name = "QMidi Output Client";
-	result = MIDIClientCreate(name.toCFString(), nullptr, nullptr,
-		&fMidiPtrs->client);
-	if (result != noErr)
-		return false;
+    fMidiPtrs->destinationId = MIDIGetDestination(outDeviceId.toUInt());
+    if (fMidiPtrs->destinationId == 0)
+        return false;
 
-	QString portName = "QMidi Output Port " + outDeviceId;
-	result = MIDIOutputPortCreate(fMidiPtrs->client, portName.toCFString(),
-		&fMidiPtrs->outputPort);
+    QString portName;
+    CFStringRef destName;
+
+    result = MIDIObjectGetStringProperty(fMidiPtrs->destinationId, kMIDIPropertyDisplayName, &destName);
+    if (result == noErr) {
+        portName = QString::fromCFString(destName);
+        CFRelease(destName);
+    }
+
+    if (portName.isEmpty())
+        portName = "Device " + outDeviceId;
+
+	result = MIDIOutputPortCreate(sMidiClient, portName.toCFString(), &fMidiPtrs->outputPort);
 	if (result != noErr) {
-		MIDIClientDispose(fMidiPtrs->client);
-		return false;
-	}
-
-	fMidiPtrs->destinationId = MIDIGetDestination(outDeviceId.toInt());
-	if (fMidiPtrs->destinationId == 0) {
-		MIDIPortDispose(fMidiPtrs->outputPort);
-		MIDIClientDispose(fMidiPtrs->client);
-		return false;
-	}
+        MIDIEndpointDispose(fMidiPtrs->destinationId);
+        return false;
+    }
 
 	fDeviceId = outDeviceId;
 	fConnected = true;
 	return true;
 }
+
 
 void QMidiOut::disconnect()
 {
@@ -94,16 +123,12 @@ void QMidiOut::disconnect()
 		fMidiPtrs->outputPort = 0;
 	}
 
-	if (fMidiPtrs->client != 0) {
-		MIDIClientDispose(fMidiPtrs->client);
-		fMidiPtrs->client = 0;
-	}
-
 	fConnected = false;
 
 	delete fMidiPtrs;
-	fMidiPtrs = 0;
+	fMidiPtrs = Q_NULLPTR;
 }
+
 
 void QMidiOut::sendMsg(qint32 msg)
 {
@@ -116,30 +141,35 @@ void QMidiOut::sendMsg(qint32 msg)
 	MIDITimeStamp timeStamp = AudioGetCurrentHostTime();
 	packet = MIDIPacketListAdd(&packetList, sizeof(packetList), packet,
 		timeStamp, sizeof(msg), (Byte*)&msg);
+    if (packet == Q_NULLPTR)
+        return;
 
 	MIDISend(fMidiPtrs->outputPort, fMidiPtrs->destinationId, &packetList);
 }
+
 
 void QMidiOut::sendSysEx(const QByteArray &data)
 {
 	if (!fConnected)
 		return;
 
-	MIDISysexSendRequest request;
-	request.bytesToSend = data.length();
-	request.complete = false;
-	request.completionProc = nullptr;
-	request.completionRefCon = nullptr;
-	request.data = (Byte *)data.constData();
-	request.destination = fMidiPtrs->destinationId;
+	MIDISysexSendRequest* request = new(std::nothrow) MIDISysexSendRequest;
+    Q_CHECK_PTR(request);
 
-	MIDISendSysex(&request);
+	request->bytesToSend = data.length();
+	request->complete = false;
+	request->completionProc = _MIDISysexCompleted;
+	request->completionRefCon = Q_NULLPTR;
+	request->data = reinterpret_cast<const Byte *>(data.constData());
+	request->destination = fMidiPtrs->destinationId;
+
+	MIDISendSysex(request);
 }
 
-// # pragma mark - QMidiIn
+
+# pragma mark - QMidiIn
 
 struct NativeMidiInInstances {
-	MIDIClientRef client;
 	MIDIPortRef inputPort;
 	MIDIEndpointRef sourceId;
 };
@@ -151,8 +181,11 @@ static void QMidiInReadProc(const MIDIPacketList *list, void *readProc,
 	QMidiIn *midiIn = static_cast<QMidiIn *>(readProc);
 	MIDIPacket *packet = const_cast<MIDIPacket *>(list->packet);
 
-	for (UInt32 index = 0; index < list->numPackets; index++) {
-		UInt16 byteCount = packet->length;
+	for (quint32 index = 0; index < list->numPackets; index++) {
+        if (packet == Q_NULLPTR)
+            return;
+
+		quint16 byteCount = packet->length;
 
 		// Check that MIDIPacket has data in 3-byte groups
 		if (byteCount != 0 && (byteCount % 3) == 0) {
@@ -161,7 +194,7 @@ static void QMidiInReadProc(const MIDIPacketList *list, void *readProc,
 				// Make sure that it's a normal MIDI message. SysEx etc.
 				// are not supported at the moment.
 				if ((packet->data[i] < 0xF0) && (packet->data[i] & 0x80)) {
-					quint32 const msg =   (packet->data[i]) 
+					const quint32 msg =   (packet->data[i])
 										| (packet->data[i + 1] << 8)
 										| (packet->data[i + 2] << 16);
 					emit midiIn->midiEvent(msg, packet->timeStamp);
@@ -175,56 +208,123 @@ static void QMidiInReadProc(const MIDIPacketList *list, void *readProc,
 
 QMap<QString, QString> QMidiIn::devices()
 {
-	QMap<QString, QString> ret;
+	QMap<QString, QString> deviceMap;
 
 	CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, false);
-	int sources = MIDIGetNumberOfSources();
-	for (int sourceIndex = 0; sourceIndex <= sources; sourceIndex++) {
+	quint32 sources = MIDIGetNumberOfSources();
+	for (quint32 sourceIndex = 0; sourceIndex <= sources; sourceIndex++) {
 		MIDIEndpointRef sourceRef = MIDIGetSource(sourceIndex);
 		if (sourceRef != 0) {
-			CFStringRef stringRef = 0;
-			char name[256];
+            CFStringRef nameRef = Q_NULLPTR;
+            MIDIObjectGetStringProperty(sourceRef,kMIDIPropertyDisplayName, &nameRef);
 
-			MIDIObjectGetStringProperty(sourceRef,
-				kMIDIPropertyDisplayName, &stringRef);
-			CFStringGetCString(stringRef, name, sizeof(name),
-				kCFStringEncodingUTF8);
-			CFRelease(stringRef);
+            deviceMap.insert(QString::number(sourceIndex),
+                             QString::fromCFString(nameRef));
 
-			ret.insert(QString::number(sourceIndex),
-				QString::fromUtf8(name));
+            CFRelease(nameRef);
 		}
 	}
 
-	return ret;
+	return deviceMap;
 }
+
 
 bool QMidiIn::connect(QString inDeviceId)
 {
+    OSStatus result = noErr;
+	dispatch_once_f(&sJustThisOneTime, &result, _initQMidiClient);
+    if (result != noErr)
+        return false;
+
 	if (fConnected)
 		disconnect();
 
-	OSStatus result;
-	fMidiPtrs = new NativeMidiInInstances;
+	fMidiPtrs = new(std::nothrow) NativeMidiInInstances;
+    Q_CHECK_PTR(fMidiPtrs);
 
-	QString name = "QMidi Input Client";
-	result = MIDIClientCreate(name.toCFString(), nullptr, nullptr,
-		&fMidiPtrs->client);
+    CFStringRef portNameRef = QString("Input Port " + inDeviceId).toCFString();
+
+    if (__builtin_available(macOS 11.0, *)) {
+        MIDIReceiveBlock receiveBlock = ^ (const MIDIEventList* eventList, void* srcConnRefCon) {
+            // We only support MIDI 1.0 protocol messages for now.
+            // TODO: Add support for handling MIDI 2.0 protocol messages.
+            if (eventList->protocol != kMIDIProtocol_1_0)
+                return;
+
+            auto packet = const_cast<MIDIEventPacket *>(eventList->packet);
+            auto midiIn = static_cast<QMidiIn *>(srcConnRefCon);
+
+            // Let's read out the Universal Midi Packets!
+            for (quint32 index = 0; index < eventList->numPackets; index++) {
+                if (packet == Q_NULLPTR)
+                    return;
+
+                for (quint32 wordIndex = 0; wordIndex < packet->wordCount; wordIndex++) {
+                    quint32 word = packet->words[wordIndex];
+                    quint8 messageType = word >> 0xCF;
+                    switch (messageType) {
+                        case kMIDIMessageTypeChannelVoice1:
+                        {
+
+                        }
+                        default:
+                            break;
+
+                    }
+
+
+                }
+
+
+                packet = MIDIEventPacketNext(packet);
+            }
+        };
+
+        result = MIDIInputPortCreateWithProtocol(sMidiClient, portNameRef,
+                                                 kMIDIProtocol_1_0, &fMidiPtrs->inputPort,
+                                                 receiveBlock);
+    } else {
+        MIDIReadBlock readBlock = ^ (const MIDIPacketList* packetList, void* srcConnRefCon) {
+            auto packet = const_cast<MIDIPacket *>(packetList->packet);
+            auto midiIn = static_cast<QMidiIn *>(srcConnRefCon);
+
+            for (quint32 index = 0; index < packetList->numPackets; index++) {
+                if (packet == Q_NULLPTR)
+                    return;
+
+                quint16 byteCount = packet->length;
+
+                // Check that MIDIPacket has data in 3-byte groups
+                if (byteCount != 0 && (byteCount % 3) == 0) {
+                    // We need to break apart the data into 3-byte messages
+                    for (int i = 0; i < byteCount; i += 3) {
+                        // Make sure that it's a normal MIDI message.
+                        // TODO: SysEx, etc. are not supported at the moment.
+                        if ((packet->data[i] < 0xF0) && (packet->data[i] & 0x80)) {
+                            const quint32 msg =   (packet->data[i])
+                                                  | (packet->data[i + 1] << 8)
+                                                  | (packet->data[i + 2] << 16);
+                            emit midiIn->midiEvent(msg, packet->timeStamp);
+                        }
+                    }
+                }
+
+                packet = MIDIPacketNext(packet);
+            }
+        };
+
+        result = MIDIInputPortCreateWithBlock(sMidiClient, portNameRef, &fMidiPtrs->inputPort,
+                                              readBlock);
+    }
+
+    CFRelease(portNameRef);
+
 	if (result != noErr)
 		return false;
 
-	QString portName = "QMidi Input Port " + inDeviceId;
-	result = MIDIInputPortCreate(fMidiPtrs->client, portName.toCFString(),
-		QMidiInReadProc, this, &fMidiPtrs->inputPort);
-	if (result != noErr) {
-		MIDIClientDispose(fMidiPtrs->client);
-		return false;
-	}
-
-	fMidiPtrs->sourceId = MIDIGetSource(inDeviceId.toInt());
+	fMidiPtrs->sourceId = MIDIGetSource(inDeviceId.toUInt());
 	if (fMidiPtrs->sourceId == 0) {
 		MIDIPortDispose(fMidiPtrs->inputPort);
-		MIDIClientDispose(fMidiPtrs->client);
 		return false;
 	}
 
@@ -232,6 +332,7 @@ bool QMidiIn::connect(QString inDeviceId)
 	fConnected = true;
 	return true;
 }
+
 
 void QMidiIn::disconnect()
 {
@@ -245,25 +346,21 @@ void QMidiIn::disconnect()
 		fMidiPtrs->inputPort = 0;
 	}
 
-	if (fMidiPtrs->client != 0) {
-		MIDIClientDispose(fMidiPtrs->client);
-		fMidiPtrs->client = 0;
-	}
-
 	fConnected = false;
 
 	delete fMidiPtrs;
-	fMidiPtrs = nullptr;
+	fMidiPtrs = Q_NULLPTR;
 }
+
 
 void QMidiIn::start()
 {
 	if (!fConnected)
 		return;
 
-	MIDIPortConnectSource(fMidiPtrs->inputPort, fMidiPtrs->sourceId,
-		nullptr);
+	MIDIPortConnectSource(fMidiPtrs->inputPort, fMidiPtrs->sourceId,this);
 }
+
 
 void QMidiIn::stop()
 {

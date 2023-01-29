@@ -4,6 +4,7 @@
  */
 #include "QMidiOut.h"
 #include "QMidiIn.h"
+#include "QMidiInternal.hpp"
 #include "OS/QMidi_ALSA.h"
 
 #include <QByteArray>
@@ -22,20 +23,17 @@ struct NativeMidiOutInstances {
 
 static QMap<QString, QString> buildDevicesMap(bool forInput)
 {
-	int streams = SND_SEQ_OPEN_OUTPUT;
-	int cap = SND_SEQ_PORT_CAP_SUBS_READ | SND_SEQ_PORT_CAP_READ;
-	if (forInput) {
-		streams = SND_SEQ_OPEN_INPUT;
-		cap = SND_SEQ_PORT_CAP_SUBS_WRITE | SND_SEQ_PORT_CAP_WRITE;
-	}
+	qint32 streams = forInput ? SND_SEQ_OPEN_INPUT : SND_SEQ_OPEN_OUTPUT;
+	quint32 cap = forInput ? (SND_SEQ_PORT_CAP_SUBS_WRITE | SND_SEQ_PORT_CAP_WRITE)
+		: (SND_SEQ_PORT_CAP_SUBS_READ | SND_SEQ_PORT_CAP_READ);
 
 	QMap<QString, QString> ret;
 
-	snd_seq_client_info_t* cinfo;
-	snd_seq_port_info_t* pinfo;
-	int client;
-	int err;
-	snd_seq_t* handle;
+	snd_seq_client_info_t* cinfo = Q_NULLPTR;
+	snd_seq_port_info_t* pinfo = Q_NULLPTR;
+	qint32 client = -1;
+	qint32 err = -1;
+	snd_seq_t* handle = Q_NULLPTR;
 
 	err = snd_seq_open(&handle, "hw", streams, 0);
 	if (err < 0) {
@@ -76,7 +74,9 @@ bool QMidiOut::connect(QString outDeviceId)
 {
 	if (fConnected)
 		disconnect();
-	fMidiPtrs = new NativeMidiOutInstances;
+
+	fMidiPtrs = new (std::nothrow) NativeMidiOutInstances;
+	Q_CHECK_PTR(fMidiPtrs);
 
 	int err = snd_seq_open(&fMidiPtrs->midiOutPtr, "default", SND_SEQ_OPEN_OUTPUT, 0);
 	if (err < 0) {
@@ -112,7 +112,7 @@ void QMidiOut::disconnect()
 
 	snd_seq_close(fMidiPtrs->midiOutPtr);
 	delete fMidiPtrs;
-	fMidiPtrs = NULL;
+	fMidiPtrs = Q_NULLPTR;
 }
 
 void QMidiOut::sendMsg(qint32 msg)
@@ -126,7 +126,7 @@ void QMidiOut::sendMsg(qint32 msg)
 	buf[2] = (msg >> 16) & 0xFF;
 
 	snd_seq_event_t ev;
-	snd_midi_event_t* mev;
+	snd_midi_event_t* mev = Q_NULLPTR;
 
 	snd_seq_ev_clear(&ev);
 	snd_seq_ev_set_source(&ev, 0);
@@ -149,7 +149,7 @@ void QMidiOut::sendSysEx(const QByteArray &data)
 		return;
 
 	snd_seq_event_t ev;
-	snd_midi_event_t* mev;
+	snd_midi_event_t* mev = Q_NULLPTR;
 
 	snd_seq_ev_set_source(&ev, 0);
 	snd_seq_ev_set_subs(&ev);
@@ -157,7 +157,7 @@ void QMidiOut::sendSysEx(const QByteArray &data)
 
 	snd_midi_event_new(data.size(), &mev);
 	snd_midi_event_resize_buffer(mev, data.size());
-	snd_midi_event_encode(mev, (unsigned char*) data.data(), data.size(), &ev);
+	snd_midi_event_encode(mev, (unsigned char*)data.constData(), data.size(), &ev);
 
 	snd_seq_event_output(fMidiPtrs->midiOutPtr, &ev);
 	snd_seq_drain_output(fMidiPtrs->midiOutPtr);
@@ -185,10 +185,13 @@ bool QMidiIn::connect(QString inDeviceId)
 	if (fConnected)
 		disconnect();
 
-	fMidiPtrs = new NativeMidiInInstances;
+	fMidiPtrs = new (std::nothrow) NativeMidiInInstances;
+	Q_CHECK_PTR(fMidiPtrs);
+
 	int err = snd_seq_open(&fMidiPtrs->midiIn, "default", SND_SEQ_OPEN_INPUT, 0);
 	if (err < 0) {
 		delete fMidiPtrs;
+		fMidiPtrs = Q_NULLPTR;
 		return false;
 	}
 	snd_seq_set_client_name(fMidiPtrs->midiIn, "QMidi");
@@ -220,7 +223,7 @@ void QMidiIn::disconnect()
 
 	snd_seq_close(fMidiPtrs->midiIn);
 	delete fMidiPtrs;
-	fMidiPtrs = nullptr;
+	fMidiPtrs = Q_NULLPTR;
 }
 
 void QMidiIn::start()
@@ -228,7 +231,9 @@ void QMidiIn::start()
 	if (!fConnected)
 		return;
 
-	fMidiPtrs->receiveThread = new QMidiInternal::MidiInReceiveThread(this, fMidiPtrs);
+	fMidiPtrs->receiveThread = new (std::nothrow) QMidiInternal::MidiInReceiveThread(this, fMidiPtrs);
+	Q_CHECK_PTR(fMidiPtrs->receiveThread);
+
 	fMidiPtrs->receiveThread->start();
 }
 
@@ -240,7 +245,7 @@ void QMidiIn::stop()
 	fMidiPtrs->receiveThread->requestInterruption();
 	fMidiPtrs->receiveThread->wait();
 	fMidiPtrs->receiveThread->deleteLater();
-	fMidiPtrs->receiveThread = nullptr;
+	fMidiPtrs->receiveThread = Q_NULLPTR;
 }
 
 QMidiInternal::MidiInReceiveThread::MidiInReceiveThread(QMidiIn* qMidiIn, NativeMidiInInstances* fMidiPtrs, QObject* parent)
@@ -249,7 +254,7 @@ QMidiInternal::MidiInReceiveThread::MidiInReceiveThread(QMidiIn* qMidiIn, Native
 
 void QMidiInternal::MidiInReceiveThread::run()
 {
-	snd_seq_event_t* ev = nullptr;
+	snd_seq_event_t* ev = Q_NULLPTR;
 	int data = 0;
 	int value = 0;
 
@@ -264,42 +269,42 @@ void QMidiInternal::MidiInReceiveThread::run()
 			continue;
 		}
 		case SND_SEQ_EVENT_NOTEOFF:
-			data = 0x80
+			data = MessageType::NoteOff
 					| (ev->data.note.channel & 0x0F)
 					| ((ev->data.note.note & 0x7F) << 8)
 					| ((ev->data.note.velocity & 0x7F) << 16);
 			break;
 		case SND_SEQ_EVENT_NOTEON:
-			data = 0x90
+			data = MessageType::NoteOn
 					| (ev->data.note.channel & 0x0F)
 					| ((ev->data.note.note & 0x7F) << 8)
 					| ((ev->data.note.velocity & 0x7F) << 16);
 			break;
 		case SND_SEQ_EVENT_KEYPRESS:
-			data = 0xA0
+			data = MessageType::PolyKeyPressure
 					| (ev->data.note.channel & 0x0F)
 					| ((ev->data.note.note & 0x7F) << 8)
 					| ((ev->data.note.velocity & 0x7F) << 16);
 			break;
 		case SND_SEQ_EVENT_CONTROLLER:
-			data = 0xB0
+			data = MessageType::ControlChange
 					| (ev->data.control.channel & 0x0F)
 					| ((ev->data.control.param & 0x7F) << 8)
 					| ((ev->data.control.value & 0x7F) << 16);
 			break;
 		case SND_SEQ_EVENT_PGMCHANGE:
-			data = 0xC0
+			data = MessageType::ProgramChange
 					| (ev->data.control.channel & 0x0F)
 					| ((ev->data.control.value & 0x7F) << 8);
 			break;
 		case SND_SEQ_EVENT_CHANPRESS:
-			data = 0xD0
+			data = MessageType::ChannelPressure
 					| (ev->data.control.channel & 0x0F)
 					| ((ev->data.control.value & 0x7F) << 8);
 			break;
 		case SND_SEQ_EVENT_PITCHBEND:
 			value = ev->data.control.value + 8192;
-			data = 0xE0
+			data = MessageType::PitchBend
 					| (ev->data.note.channel & 0x0F)
 					| ((value & 0x7F) << 8)
 					| (((value >> 7) & 0x7F) << 16);

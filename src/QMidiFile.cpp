@@ -8,6 +8,9 @@
 #include <QFile>
 #include <cstdlib>
 
+#include "QMidiInternal.hpp"
+
+
 QMidiEvent::QMidiEvent()
 {
 	fTrackNumber = -1;
@@ -30,55 +33,55 @@ QMidiEvent::~QMidiEvent()
 quint32 QMidiEvent::message() const
 {
 	union {
-		unsigned char data_as_bytes[4];
+		quint8 data_as_bytes[4];
 		quint32 data_as_uint32;
 	} u;
 
 	switch (fType) {
 	case NoteOff:
-		u.data_as_bytes[0] = 0x80 | fVoice;
+		u.data_as_bytes[0] = MessageType::NoteOff | fVoice;
 		u.data_as_bytes[1] = fNote;
 		u.data_as_bytes[2] = fVelocity;
-		u.data_as_bytes[3] = 0; 
+		u.data_as_bytes[3] = 0;
 		break;
 
 	case NoteOn:
-		u.data_as_bytes[0] = 0x90 | fVoice;
+		u.data_as_bytes[0] = MessageType::NoteOn | fVoice;
 		u.data_as_bytes[1] = fNote;
 		u.data_as_bytes[2] = fVelocity;
 		u.data_as_bytes[3] = 0;
 		break;
 
 	case KeyPressure:
-		u.data_as_bytes[0] = 0xA0 | fVoice;
+		u.data_as_bytes[0] = MessageType::PolyKeyPressure | fVoice;
 		u.data_as_bytes[1] = fNote;
 		u.data_as_bytes[2] = fAmount;
 		u.data_as_bytes[3] = 0;
 		break;
 
 	case ControlChange:
-		u.data_as_bytes[0] = 0xB0 | fVoice;
+		u.data_as_bytes[0] = MessageType::ControlChange | fVoice;
 		u.data_as_bytes[1] = fNumber;
 		u.data_as_bytes[2] = fValue;
 		u.data_as_bytes[3] = 0;
 		break;
 
 	case ProgramChange:
-		u.data_as_bytes[0] = 0xC0 | fVoice;
+		u.data_as_bytes[0] = MessageType::ProgramChange | fVoice;
 		u.data_as_bytes[1] = fNumber;
 		u.data_as_bytes[2] = 0;
 		u.data_as_bytes[3] = 0;
 		break;
 
 	case ChannelPressure:
-		u.data_as_bytes[0] = 0xD0 | fVoice;
+		u.data_as_bytes[0] = MessageType::ChannelPressure | fVoice;
 		u.data_as_bytes[1] = fAmount;
 		u.data_as_bytes[2] = 0;
 		u.data_as_bytes[3] = 0;
 		break;
 
 	case PitchWheel:
-		u.data_as_bytes[0] = 0xE0 | fVoice;
+		u.data_as_bytes[0] = MessageType::PitchBend | fVoice;
 		u.data_as_bytes[2] = fValue >> 7;
 		u.data_as_bytes[1] = fValue;
 		u.data_as_bytes[3] = 0;
@@ -95,55 +98,55 @@ void QMidiEvent::setMessage(quint32 data)
 {
 	union {
 		quint32 data_as_uint32;
-		unsigned char data_as_bytes[4];
+		quint8 data_as_bytes[4];
 	} u;
 
 	u.data_as_uint32 = data;
 
-	switch (u.data_as_bytes[0] & 0xF0) {
-	case 0x80: {
+	switch (u.data_as_bytes[0] & STATUS_CHANNEL_MASK) {
+	case MessageType::NoteOff: {
 		setType(NoteOff);
-		setVoice(u.data_as_bytes[0] & 0x0F);
+		setVoice(u.data_as_bytes[0] & STATUS_VOICE_MASK);
 		setNote(u.data_as_bytes[1]);
 		setVelocity(u.data_as_bytes[2]);
 		return;
 	}
-	case 0x90: {
+	case MessageType::NoteOn: {
 		setType(NoteOn);
-		setVoice(u.data_as_bytes[0] & 0x0F);
+		setVoice(u.data_as_bytes[0] & STATUS_VOICE_MASK);
 		setNote(u.data_as_bytes[1]);
 		setVelocity(u.data_as_bytes[2]);
 		return;
 	}
-	case 0xA0: {
+	case MessageType::PolyKeyPressure: {
 		setType(KeyPressure);
-		setVoice(u.data_as_bytes[0] & 0x0F);
+		setVoice(u.data_as_bytes[0] & STATUS_VOICE_MASK);
 		setNote(u.data_as_bytes[1]);
 		setAmount(u.data_as_bytes[2]);
 		return;
 	}
-	case 0xB0: {
+	case MessageType::ControlChange: {
 		setType(ControlChange);
-		setVoice(u.data_as_bytes[0] & 0x0F);
+		setVoice(u.data_as_bytes[0] & STATUS_VOICE_MASK);
 		setNumber(u.data_as_bytes[1]);
 		setValue(u.data_as_bytes[2]);
 		return;
 	}
-	case 0xC0: {
+	case MessageType::ProgramChange: {
 		setType(ProgramChange);
-		setVoice(u.data_as_bytes[0] & 0x0F);
+		setVoice(u.data_as_bytes[0] & STATUS_VOICE_MASK);
 		setNumber(u.data_as_bytes[1]);
 		return;
 	}
-	case 0xD0: {
+	case MessageType::ChannelPressure: {
 		setType(ChannelPressure);
-		setVoice(u.data_as_bytes[0] & 0x0F);
+		setVoice(u.data_as_bytes[0] & STATUS_VOICE_MASK);
 		setAmount(u.data_as_bytes[1]);
 		return;
 	}
-	case 0xE0: {
+	case MessageType::PitchBend: {
 		setType(PitchWheel);
-		setVoice(u.data_as_bytes[0] & 0x0F);
+		setVoice(u.data_as_bytes[0] & STATUS_VOICE_MASK);
 		setValue((u.data_as_bytes[2] << 7) | u.data_as_bytes[1]);
 		return;
 	}
@@ -152,14 +155,14 @@ void QMidiEvent::setMessage(quint32 data)
 
 float QMidiEvent::tempo()
 {
-	unsigned char* buffer;
+	quint8* buffer = Q_NULLPTR;
 	qint32 midi_tempo = 0;
 
 	if ((fType != Meta) || (fNumber != Tempo)) {
 		return -1;
 	}
 
-	buffer = (unsigned char*)fData.constData();
+	buffer = (quint8*)fData.constData();
 	midi_tempo = (buffer[0] << 16) | (buffer[1] << 8) | buffer[2];
 	return (float)(60000000.0 / midi_tempo);
 }
@@ -193,17 +196,21 @@ QMidiFile* QMidiFile::oneTrackPerVoice()
 	if (fFileFormat != 0) {
 		return 0;
 	}
-	QMidiFile* ret = new QMidiFile();
+
+	QMidiFile* ret = new (std::nothrow) QMidiFile();
+	Q_CHECK_PTR(ret);
 
 	ret->setDivisionType(fDivType);
 	ret->setResolution(fResolution);
 	ret->setFileFormat(1);
 
-	QMap<int /*voice*/, int /*track*/> tracks;
+	QMap<qint32 /*voice*/, qint32 /*track*/> tracks;
 	ret->createTrack(); /* Track 0 */
 	ret->fDisableSort = true;
 	for (QMidiEvent* event : fEvents) {
-		QMidiEvent* e = new QMidiEvent();
+		QMidiEvent* e = new (std::nothrow) QMidiEvent();
+		Q_CHECK_PTR(e);
+
 		*e = *event; /* copy data buffer */
 		if ((e->type() == QMidiEvent::Meta) && (e->number() == QMidiEvent::TrackName)) {
 			e->setTrack(1);
@@ -257,7 +264,7 @@ void QMidiFile::removeEvent(QMidiEvent* e)
 	}
 }
 
-QList<QMidiEvent*> QMidiFile::eventsForTrack(int track)
+QList<QMidiEvent*> QMidiFile::eventsForTrack(qint32 track)
 {
 	QList<QMidiEvent*> ret;
 	for (QMidiEvent* e : fEvents) {
@@ -268,7 +275,7 @@ QList<QMidiEvent*> QMidiFile::eventsForTrack(int track)
 	return ret;
 }
 
-QList<QMidiEvent*> QMidiFile::events(int voice)
+QList<QMidiEvent*> QMidiFile::events(qint32 voice)
 {
 	QList<QMidiEvent*> ret;
 	for (QMidiEvent* e : fEvents) {
@@ -279,23 +286,23 @@ QList<QMidiEvent*> QMidiFile::events(int voice)
 	return ret;
 }
 
-int QMidiFile::createTrack()
+qint32 QMidiFile::createTrack()
 {
-	int t = fTracks.count();
+	qint32 t = fTracks.count();
 	fTracks.append(t);
 	return t;
 }
 
-void QMidiFile::removeTrack(int track)
+void QMidiFile::removeTrack(qint32 track)
 {
 	if (fTracks.contains(track)) {
 		fTracks.removeOne(track);
 	}
 }
 
-qint32 QMidiFile::trackEndTick(int track)
+qint32 QMidiFile::trackEndTick(qint32 track)
 {
-	for (int i = fEvents.size() - 1; i >= 0; i--) {
+	for (qint32 i = fEvents.size() - 1; i >= 0; i--) {
 		QMidiEvent* e = fEvents.at(i);
 		if (e->track() == track) {
 			return e->tick();
@@ -304,16 +311,18 @@ qint32 QMidiFile::trackEndTick(int track)
 	return 0;
 }
 
-QMidiEvent* QMidiFile::createNote(int track, qint32 start_tick, qint32 end_tick, int voice,
-								  int note, int start_velocity, int end_velocity)
+QMidiEvent* QMidiFile::createNote(qint32 track, qint32 start_tick, qint32 end_tick, qint32 voice,
+								  qint32 note, qint32 start_velocity, qint32 end_velocity)
 {
 	createNoteOffEvent(track, end_tick, voice, note, end_velocity);
 	return createNoteOnEvent(track, start_tick, voice, note, start_velocity);
 }
 
-QMidiEvent* QMidiFile::createNoteOffEvent(int track, qint32 tick, int voice, int note, int velocity)
+QMidiEvent* QMidiFile::createNoteOffEvent(qint32 track, qint32 tick, qint32 voice, qint32 note, qint32 velocity)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setType(QMidiEvent::NoteOff);
 	e->setTrack(track);
 	e->setVoice(voice);
@@ -322,9 +331,11 @@ QMidiEvent* QMidiFile::createNoteOffEvent(int track, qint32 tick, int voice, int
 	addEvent(tick, e);
 	return e;
 }
-QMidiEvent* QMidiFile::createNoteOnEvent(int track, qint32 tick, int voice, int note, int velocity)
+QMidiEvent* QMidiFile::createNoteOnEvent(qint32 track, qint32 tick, qint32 voice, qint32 note, qint32 velocity)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setType(QMidiEvent::NoteOn);
 	e->setTrack(track);
 	e->setVoice(voice);
@@ -333,10 +344,12 @@ QMidiEvent* QMidiFile::createNoteOnEvent(int track, qint32 tick, int voice, int 
 	addEvent(tick, e);
 	return e;
 }
-QMidiEvent* QMidiFile::createKeyPressureEvent(int track, qint32 tick, int voice, int note,
-											  int amount)
+QMidiEvent* QMidiFile::createKeyPressureEvent(qint32 track, qint32 tick, qint32 voice, qint32 note,
+											  qint32 amount)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setType(QMidiEvent::KeyPressure);
 	e->setTrack(track);
 	e->setVoice(voice);
@@ -345,9 +358,11 @@ QMidiEvent* QMidiFile::createKeyPressureEvent(int track, qint32 tick, int voice,
 	addEvent(tick, e);
 	return e;
 }
-QMidiEvent* QMidiFile::createChannelPressureEvent(int track, qint32 tick, int voice, int amount)
+QMidiEvent* QMidiFile::createChannelPressureEvent(qint32 track, qint32 tick, qint32 voice, qint32 amount)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setType(QMidiEvent::ChannelPressure);
 	e->setTrack(track);
 	e->setVoice(voice);
@@ -355,10 +370,12 @@ QMidiEvent* QMidiFile::createChannelPressureEvent(int track, qint32 tick, int vo
 	addEvent(tick, e);
 	return e;
 }
-QMidiEvent* QMidiFile::createControlChangeEvent(int track, qint32 tick, int voice, int number,
-												int value)
+QMidiEvent* QMidiFile::createControlChangeEvent(qint32 track, qint32 tick, qint32 voice, qint32 number,
+												qint32 value)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setType(QMidiEvent::ControlChange);
 	e->setTrack(track);
 	e->setVoice(voice);
@@ -367,9 +384,11 @@ QMidiEvent* QMidiFile::createControlChangeEvent(int track, qint32 tick, int voic
 	addEvent(tick, e);
 	return e;
 }
-QMidiEvent* QMidiFile::createProgramChangeEvent(int track, qint32 tick, int voice, int number)
+QMidiEvent* QMidiFile::createProgramChangeEvent(qint32 track, qint32 tick, qint32 voice, qint32 number)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setType(QMidiEvent::ProgramChange);
 	e->setTrack(track);
 	e->setVoice(voice);
@@ -377,9 +396,11 @@ QMidiEvent* QMidiFile::createProgramChangeEvent(int track, qint32 tick, int voic
 	addEvent(tick, e);
 	return e;
 }
-QMidiEvent* QMidiFile::createPitchWheelEvent(int track, qint32 tick, int voice, int value)
+QMidiEvent* QMidiFile::createPitchWheelEvent(qint32 track, qint32 tick, qint32 voice, qint32 value)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setType(QMidiEvent::PitchWheel);
 	e->setTrack(track);
 	e->setVoice(voice);
@@ -387,18 +408,22 @@ QMidiEvent* QMidiFile::createPitchWheelEvent(int track, qint32 tick, int voice, 
 	addEvent(tick, e);
 	return e;
 }
-QMidiEvent* QMidiFile::createSysexEvent(int track, qint32 tick, QByteArray data)
+QMidiEvent* QMidiFile::createSysexEvent(qint32 track, qint32 tick, QByteArray data)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setType(QMidiEvent::SysEx);
 	e->setTrack(track);
 	e->setData(data);
 	addEvent(tick, e);
 	return e;
 }
-QMidiEvent* QMidiFile::createMetaEvent(int track, qint32 tick, int number, QByteArray data)
+QMidiEvent* QMidiFile::createMetaEvent(qint32 track, qint32 tick, qint32 number, QByteArray data)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setType(QMidiEvent::Meta);
 	e->setTrack(track);
 	e->setNumber(number);
@@ -406,19 +431,21 @@ QMidiEvent* QMidiFile::createMetaEvent(int track, qint32 tick, int number, QByte
 	addEvent(tick, e);
 	return e;
 }
-QMidiEvent* QMidiFile::createTempoEvent(int track, qint32 tick, float tempo)
+QMidiEvent* QMidiFile::createTempoEvent(qint32 track, qint32 tick, float tempo)
 {
-	long midi_tempo = 60000000L / tempo;
+	qint64 midi_tempo = 60000000L / tempo;
 	QByteArray buffer(3, 0);
 	buffer[0] = (midi_tempo >> 16) & 0xFF;
 	buffer[1] = (midi_tempo >> 8) & 0xFF;
 	buffer[2] = midi_tempo & 0xFF;
 	return createMetaEvent(track, tick, QMidiEvent::Tempo, buffer);
 }
-QMidiEvent* QMidiFile::createTimeSignatureEvent(int track, qint32 tick, int numerator,
-												int denominator)
+QMidiEvent* QMidiFile::createTimeSignatureEvent(qint32 track, qint32 tick, qint32 numerator,
+												qint32 denominator)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setType(QMidiEvent::Meta);
 	e->setNumber(QMidiEvent::TimeSignature);
 	e->setTrack(track);
@@ -427,9 +454,11 @@ QMidiEvent* QMidiFile::createTimeSignatureEvent(int track, qint32 tick, int nume
 	addEvent(tick, e);
 	return e;
 }
-QMidiEvent* QMidiFile::createLyricEvent(int track, qint32 tick, QByteArray text)
+QMidiEvent* QMidiFile::createLyricEvent(qint32 track, qint32 tick, QByteArray text)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setType(QMidiEvent::Meta);
 	e->setNumber(QMidiEvent::Lyric);
 	e->setTrack(track);
@@ -437,9 +466,11 @@ QMidiEvent* QMidiFile::createLyricEvent(int track, qint32 tick, QByteArray text)
 	addEvent(tick, e);
 	return e;
 }
-QMidiEvent* QMidiFile::createMarkerEvent(int track, qint32 tick, QByteArray text)
+QMidiEvent* QMidiFile::createMarkerEvent(qint32 track, qint32 tick, QByteArray text)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setType(QMidiEvent::Meta);
 	e->setNumber(QMidiEvent::Marker);
 	e->setTrack(track);
@@ -447,9 +478,11 @@ QMidiEvent* QMidiFile::createMarkerEvent(int track, qint32 tick, QByteArray text
 	addEvent(tick, e);
 	return e;
 }
-QMidiEvent* QMidiFile::createVoiceEvent(int track, qint32 tick, quint32 data)
+QMidiEvent* QMidiFile::createVoiceEvent(qint32 track, qint32 tick, quint32 data)
 {
-	QMidiEvent* e = new QMidiEvent();
+	QMidiEvent* e = new (std::nothrow) QMidiEvent();
+	Q_CHECK_PTR(e);
+
 	e->setTrack(track);
 	e->setMessage(data);
 	addEvent(tick, e);
@@ -564,48 +597,48 @@ qint32 QMidiFile::tickFromBeat(float beat)
  * Helpers
  */
 
-qint16 interpret_int16(unsigned char* buffer)
+qint16 interpret_int16(qint8* buffer)
 {
 	return ((qint16)(buffer[0]) << 8) | (qint16)(buffer[1]);
 }
-quint16 interpret_uint16(unsigned char* buffer)
+quint16 interpret_uint16(qint8* buffer)
 {
 	return ((quint16)(buffer[0]) << 8) | (quint16)(buffer[1]);
 }
 quint16 read_uint16(QFile* in)
 {
-	unsigned char buffer[2];
+	qint8 buffer[2];
 	in->read((char*)buffer, 2);
 	return interpret_uint16(buffer);
 }
 void write_uint16(QFile* out, quint16 value)
 {
-	unsigned char buffer[2];
-	buffer[0] = (unsigned char)((value >> 8) & 0xFF);
-	buffer[1] = (unsigned char)(value & 0xFF);
+	qint8 buffer[2];
+	buffer[0] = (qint8)((value >> 8) & 0xFF);
+	buffer[1] = (qint8)(value & 0xFF);
 	out->write((char*)buffer, 2);
 }
 
 quint32 read_uint32(QFile* in)
 {
-	unsigned char buffer[4];
+	qint8 buffer[4];
 	in->read((char*)&buffer, 4);
 	return ((quint32)(buffer[0]) << 24) | ((quint32)(buffer[1]) << 16) |
 		   ((quint32)(buffer[2]) << 8) | (quint32)(buffer[3]);
 }
 void write_uint32(QFile* out, quint32 value)
 {
-	unsigned char buffer[4];
-	buffer[0] = (unsigned char)(value >> 24);
-	buffer[1] = (unsigned char)((value >> 16) & 0xFF);
-	buffer[2] = (unsigned char)((value >> 8) & 0xFF);
-	buffer[3] = (unsigned char)(value & 0xFF);
+	qint8 buffer[4];
+	buffer[0] = (qint8)(value >> 24);
+	buffer[1] = (qint8)((value >> 16) & 0xFF);
+	buffer[2] = (qint8)((value >> 8) & 0xFF);
+	buffer[3] = (qint8)(value & 0xFF);
 	out->write((char*)buffer, 4);
 }
 
 quint32 read_variable_length_quantity(QFile* in)
 {
-	unsigned char b;
+	qint8 b;
 	quint32 value = 0;
 
 	do {
@@ -617,11 +650,11 @@ quint32 read_variable_length_quantity(QFile* in)
 }
 void write_variable_length_quantity(QFile* out, quint32 value)
 {
-	unsigned char buffer[4];
-	int offset = 3;
+	qint8 buffer[4];
+	qint8 offset = 3;
 
 	forever {
-		buffer[offset] = (unsigned char)(value & 0x7F);
+		buffer[offset] = (qint8)(value & 0x7F);
 		if (offset < 3) buffer[offset] |= 0x80;
 		value >>= 7;
 		if ((value == 0) || (offset == 0)) {
@@ -643,9 +676,10 @@ bool QMidiFile::load(QString filename)
 	}
 
 	fDisableSort = true;
-	unsigned char chunk_id[4], division_type_and_resolution[4];
-	qint32 chunk_size = 0, chunk_start = 0;
-	int file_format = 0, number_of_tracks = 0, number_of_tracks_read = 0;
+	uchar chunk_id[4];
+	qint8 division_type_and_resolution[2];
+	qint64 chunk_size = 0, chunk_start = 0;
+	quint16 file_format = 0, number_of_tracks = 0, number_of_tracks_read = 0;
 
 	in.read((char*)chunk_id, 4);
 	chunk_size = read_uint32(&in);
@@ -687,7 +721,7 @@ bool QMidiFile::load(QString filename)
 	number_of_tracks = read_uint16(&in);
 	in.read((char*)division_type_and_resolution, 2);
 
-	switch ((signed char)(division_type_and_resolution[0])) {
+	switch (division_type_and_resolution[0]) {
 	case SMPTE24: {
 		fFileFormat = file_format;
 		fDivType = SMPTE24;
@@ -729,11 +763,11 @@ bool QMidiFile::load(QString filename)
 		chunk_start = in.pos();
 
 		if (memcmp(chunk_id, "MTrk", 4) == 0) {
-			int track = createTrack();
+			qint32 track = createTrack();
 			qint32 tick = 0, previous_tick = 0;
 			qint64 previous_pos = 0;
-			unsigned char status, running_status = 0;
-			int at_end_of_track = 0;
+			quint8 status, running_status = 0;
+			bool at_end_of_track = false;
 
 			while ((in.pos() < chunk_start + chunk_size) && !at_end_of_track) {
 				tick = read_variable_length_quantity(&in) + previous_tick;
@@ -756,63 +790,63 @@ bool QMidiFile::load(QString filename)
 				}
 				previous_pos = in.pos();
 
-				switch (status & 0xF0) {
-				case 0x80: {
-					int channel = status & 0x0F;
+				switch (status & STATUS_CHANNEL_MASK) {
+				case MessageType::NoteOff: {
+					qint32 voice = status & STATUS_VOICE_MASK;
 					char note;
 					in.getChar(&note);
 					char velocity;
 					in.getChar(&velocity);
-					createNoteOffEvent(track, tick, channel, note, velocity);
+					createNoteOffEvent(track, tick, voice, note, velocity);
 					break;
 				}
-				case 0x90: {
-					int channel = status & 0x0F;
+				case MessageType::NoteOn: {
+					qint32 voice = status & STATUS_VOICE_MASK;
 					char note;
 					in.getChar(&note);
 					char velocity;
 					in.getChar(&velocity);
 					if (velocity != 0) {
-						createNoteOnEvent(track, tick, channel, note, velocity);
+						createNoteOnEvent(track, tick, voice, note, velocity);
 					} else {
-						createNoteOffEvent(track, tick, channel, note);
+						createNoteOffEvent(track, tick, voice, note);
 					}
 					break;
 				}
-				case 0xA0: {
-					int channel = status & 0x0F;
+				case MessageType::PolyKeyPressure: {
+					qint32 voice = status & STATUS_VOICE_MASK;
 					char note;
 					in.getChar(&note);
 					char amount;
 					in.getChar(&amount);
-					createKeyPressureEvent(track, tick, channel, note, amount);
+					createKeyPressureEvent(track, tick, voice, note, amount);
 					break;
 				}
-				case 0xB0: {
-					int channel = status & 0x0F;
+				case MessageType::ControlChange: {
+					qint32 voice = status & STATUS_VOICE_MASK;
 					char number;
 					in.getChar(&number);
 					char value;
 					in.getChar(&value);
-					createControlChangeEvent(track, tick, channel, number, value);
+					createControlChangeEvent(track, tick, voice, number, value);
 					break;
 				}
-				case 0xC0: {
-					int channel = status & 0x0F;
+				case MessageType::ProgramChange: {
+					qint32 voice = status & STATUS_VOICE_MASK;
 					char number;
 					in.getChar(&number);
-					createProgramChangeEvent(track, tick, channel, number);
+					createProgramChangeEvent(track, tick, voice, number);
 					break;
 				}
-				case 0xD0: {
-					int channel = status & 0x0F;
+				case MessageType::ChannelPressure: {
+					qint32 voice = status & STATUS_VOICE_MASK;
 					char amount;
 					in.getChar(&amount);
-					createChannelPressureEvent(track, tick, channel, amount);
+					createChannelPressureEvent(track, tick, voice, amount);
 					break;
 				}
-				case 0xE0: {
-					int channel = status & 0x0F;
+				case MessageType::PitchBend: {
+					qint32 voice = status & STATUS_VOICE_MASK;
 					char value;
 					in.getChar(&value);
 					char value2;
@@ -821,14 +855,14 @@ bool QMidiFile::load(QString filename)
 					qint16 pitch;
 					pitch = ((value2 & 0x7F) << 7) | (value & 0x7F); // Unpack 14-bit value
 
-					createPitchWheelEvent(track, tick, channel, pitch);
+					createPitchWheelEvent(track, tick, voice, pitch);
 					break;
 				}
-				case 0xF0: {
+				case MessageType::SystemExclusive: {
 					switch (status) {
-					case 0xF0:
-					case 0xF7: {
-						int data_length = read_variable_length_quantity(&in) + 1;
+					case SystemExclusiveStart:
+					case SystemExclusiveEnd: {
+						qint32 data_length = read_variable_length_quantity(&in) + 1;
 						QByteArray data(1, 0);
 						data[0] = status;
 						data += in.read(data_length - 1);
@@ -839,11 +873,11 @@ bool QMidiFile::load(QString filename)
 					case 0xFF: {
 						char number;
 						in.getChar(&number);
-						int data_length = read_variable_length_quantity(&in);
+						qint32 data_length = read_variable_length_quantity(&in);
 						QByteArray data = in.read(data_length);
 
 						if (number == 0x2F) {
-							at_end_of_track = 1;
+							at_end_of_track = true;
 						} else {
 							createMetaEvent(track, tick, number, data);
 						}
@@ -877,19 +911,24 @@ bool QMidiFile::load(QString filename)
 
 bool QMidiFile::save(QString filename)
 {
+	if (filename.isEmpty()) {
+		return false;
+	}
+
 	QFile out(filename);
 
 	if (out.exists()) {
 		out.remove();
 	}
-	if ((filename == "") || !(out.open(QFile::WriteOnly))) {
+
+	if (!out.open(QFile::WriteOnly)) {
 		return false;
 	}
 
 	out.write("MThd", 4);
 	write_uint32(&out, 6);
 	write_uint16(&out, (quint16)(fFileFormat));
-	write_uint16(&out, (quint16)(fTracks.size()));
+	write_uint16(&out, (quint16)(fTracks.count()));
 
 	switch (fDivType) {
 	case PPQ:
@@ -901,17 +940,18 @@ bool QMidiFile::save(QString filename)
 		break;
 	}
 
-	for (int curTrack : fTracks) {
-		qint32 track_size_offset, track_start_offset, track_end_offset, tick, previous_tick;
+	quint32 track_size_offset, track_start_offset, track_end_offset;
+	quint32 tick, previous_tick;
+	for (qint32 curTrack : fTracks) {
+		track_size_offset = track_start_offset = track_end_offset = 0;
+		tick = previous_tick = 0;
 
 		out.write("MTrk", 4);
 
-		track_size_offset = out.pos();
+		track_size_offset = (quint32)out.pos();
 		write_uint32(&out, 0);
 
-		track_start_offset = out.pos();
-
-		previous_tick = 0;
+		track_start_offset = (quint32)out.pos();
 
 		QList<QMidiEvent*> eventsForTrk = eventsForTrack(curTrack);
 		for (QMidiEvent* e : eventsForTrk) {
@@ -920,57 +960,58 @@ bool QMidiFile::save(QString filename)
 
 			switch (e->type()) {
 			case QMidiEvent::NoteOff:
-				out.putChar(0x80 | (e->voice() & 0x0F));
+				out.putChar(MessageType::NoteOff
+					| (e->voice() & STATUS_VOICE_MASK));
 				out.putChar(e->note() & 0x7F);
 				out.putChar(e->velocity() & 0x7F);
 				break;
 
 			case QMidiEvent::NoteOn:
-				out.putChar(0x90 | (e->voice() & 0x0F));
+				out.putChar(MessageType::NoteOn | (e->voice() & STATUS_VOICE_MASK));
 				out.putChar(e->note() & 0x7F);
 				out.putChar(e->velocity() & 0x7F);
 				break;
 
 			case QMidiEvent::KeyPressure:
-				out.putChar(0xA0 | (e->voice() & 0x0F));
+				out.putChar(MessageType::PolyKeyPressure | (e->voice() & STATUS_VOICE_MASK));
 				out.putChar(e->note() & 0x7F);
 				out.putChar(e->amount() & 0x7F);
 				break;
 
 			case QMidiEvent::ControlChange:
-				out.putChar(0xB0 | (e->voice() & 0x0F));
+				out.putChar(MessageType::ControlChange | (e->voice() & STATUS_VOICE_MASK));
 				out.putChar(e->number() & 0x7F);
 				out.putChar(e->value() & 0x7F);
 				break;
 
 			case QMidiEvent::ProgramChange:
-				out.putChar(0xC0 | (e->voice() & 0x0F));
+				out.putChar(MessageType::ProgramChange | (e->voice() & STATUS_VOICE_MASK));
 				out.putChar(e->number() & 0x7F);
 				break;
 
 			case QMidiEvent::ChannelPressure:
-				out.putChar(0xD0 | (e->voice() & 0x0F));
+				out.putChar(MessageType::ChannelPressure | (e->voice() & STATUS_VOICE_MASK));
 				out.putChar(e->value() & 0x7F);
 				break;
 
 			case QMidiEvent::PitchWheel: {
-				int value = e->value();
-				out.putChar(0xE0 | (e->voice() & 0x0F));
+				const qint32 value = e->value();
+				out.putChar(MessageType::PitchBend | (e->voice() & STATUS_VOICE_MASK));
 				out.putChar(value & 0x7F);
 				out.putChar((value >> 7) & 0x7F);
 				break;
 			}
 			case QMidiEvent::SysEx: {
-				int data_length = e->data().size();
-				unsigned char* data = (unsigned char*)e->data().constData();
+				const qint32 data_length = e->data().length();
+				const qint8* data = (qint8*)e->data().constData();
 				out.putChar(data[0]);
 				write_variable_length_quantity(&out, data_length - 1);
 				out.write((char*)data + 1, data_length - 1);
 				break;
 			}
 			case QMidiEvent::Meta: {
-				int data_length = e->data().size();
-				unsigned char* data = (unsigned char*)e->data().constData();
+				const qint32 data_length = e->data().length();
+				const qint8* data = (qint8*)e->data().constData();
 				out.putChar(0xFF);
 				out.putChar(e->number() & 0x7F);
 				write_variable_length_quantity(&out, data_length);
@@ -987,7 +1028,7 @@ bool QMidiFile::save(QString filename)
 		write_variable_length_quantity(&out, trackEndTick(curTrack) - previous_tick);
 		out.write("\xFF\x2F\x00", 3);
 
-		track_end_offset = out.pos();
+		track_end_offset = (quint32)out.pos();
 
 		out.seek(track_size_offset);
 		write_uint32(&out, track_end_offset - track_start_offset);

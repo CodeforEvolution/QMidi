@@ -6,7 +6,7 @@
 
 QMidiIn::QMidiIn(QObject *parent)
 	: QObject(parent),
-	fMidiPtrs(nullptr),
+	fMidiPtrs(Q_NULLPTR),
 	fConnected(false)
 {
 }

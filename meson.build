@@ -1,30 +1,75 @@
 project('QMidi', 'cpp')
 
-cppCompiler = meson.get_compiler('cpp')
+cpp_compiler = meson.get_compiler('cpp')
 
-qt5 = import('qt5' )
-Qt5_dep = dependency('qt5', modules: ['Core'])
+qt5 = import('qt5', required: get_option('qt5'))
+qt6 = import('qt6', required: get_option('qt6'))
 
-include_dir = include_directories('src/')
+qt5_dep = dependency('qt5', modules: ['Core'], required: get_option('qt5'))
+qt6_dep = dependency('qt6', modules: ['Core'], required: get_option('qt6'))
+
+qt5_sources = []
+qt6_sources = []
+
+include_dir = []
+sources = []
+dependencies = []
+
+## Legacy ##
 
 # Common QMidi source files & library
-sources = ['src/QMidiFile.cpp', 'src/QMidiIn.cpp', 'src/QMidiOut.cpp', qt5.preprocess(moc_headers: ['src/QMidiIn.h'], include_directories: include_dir, dependencies: Qt5_dep)]
-dependencies = [Qt5_dep]
+include_dir += include_directories( 'src/legacy')
+sources += ['src/legacy/QMidiFile.cpp', 'src/legacy/QMidiIn.cpp', 'src/legacy/QMidiOut.cpp', 'src/QMidiRoster.cpp']
+
+# Common QMidi Qt version specific sources
+# Qt version specific sources
+if qt5.found()
+  qt5_sources += [qt5.preprocess(moc_headers: ['src/legacy/QMidiIn.h'], include_directories: include_dir)]
+endif
+
+if qt6.found()
+  qt6_sources += [qt6.preprocess(moc_headers: ['src/legacy/QMidiIn.h'], include_directories: include_dir)]
+endif
 
 # Platform specific QMidi source files & libraries
 if build_machine.system() == 'windows'
-  dependencies += cppCompiler.find_library('winmm')
-  sources += 'src/OS/QMidi_Win32.cpp'
+  dependencies += cpp_compiler.find_library('winmm')
+  sources += 'src/legacy/OS/QMidi_Win32.cpp'
+
 elif build_machine.system() == 'linux'
-  dependencies += cppCompiler.find_library('asound')
-  sources += ['src/OS/QMidi_ALSA.cpp', qt5.preprocess(moc_headers: ['src/OS/QMidi_ALSA.h'], include_directories: include_dir, dependencies: Qt5_dep)]
+  dependencies += cpp_compiler.find_library('asound')
+  sources += ['src/legacy/OS/QMidi_ALSA.cpp']
+  if qt5.found()
+    qt5_sources += qt5.preprocess(moc_headers: ['src/legacy/OS/QMidi_ALSA.h'], include_directories: include_dir)
+  endif
+  if qt6.found()
+    qt6_sources += qt6.preprocess(moc_headers: ['src/legacy/OS/QMidi_ALSA.h'], include_directories: include_dir)
+  endif
+
 elif build_machine.system() == 'haiku'
-  dependencies += cppCompiler.find_library('midi2')
-  sources += 'src/OS/QMidi_Haiku.cpp'
+  dependencies += cpp_compiler.find_library('midi2')
+  sources += 'src/legacy/OS/QMidi_Haiku.cpp'
+
 elif build_machine.system() == 'darwin'
-  dependencies += [cppCompiler.find_library('-framework CoreMIDI'), cppCompiler.find_library('-framework CoreFoundation'), cppCompiler.find_library('-framework CoreAudio')]
-  sources += 'src/OS/QMidi_CoreMidi.cpp'
+  dependencies += [cpp_compiler.find_library('-framework CoreMIDI'), cpp_compiler.find_library('-framework CoreFoundation'), cpp_compiler.find_library('-framework CoreAudio')]
+  sources += 'src/legacy/OS/QMidi_CoreMidi.cpp'
+
 endif
 
+## End Legacy ##
+
+## Modern ##
+
+
+
+## End Modern ##
+
+
 # Add library
-QMidi_lib = library(meson.project_name(), sources, dependencies: dependencies, include_directories: include_dir)
+if qt5_dep.found()
+  library(meson.project_name() + '5', sources + qt5_sources, dependencies: dependencies + qt5_dep, include_directories: include_dir, install: true)
+endif
+
+if qt6_dep.found()
+  library(meson.project_name() + '6', sources + qt6_sources, dependencies: dependencies + qt6_dep, include_directories: include_dir, install: true)
+endif

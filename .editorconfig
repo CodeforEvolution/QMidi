@@ -7,7 +7,7 @@ insert_final_newline = true
 
 [*.{cpp,h,pri,pro}]
 indent_style = tab
-tab_width = 8
+tab_width = 4
 trim_trailing_whitespace = true
 
 [.travis.yml]
